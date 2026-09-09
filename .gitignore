@@ -1,0 +1,11 @@
+build/
+dist/
+debug/
+out/
+_build/
+cmake/
+nbproject/private/
+*.o
+*.hex
+*.elf
+*.map
