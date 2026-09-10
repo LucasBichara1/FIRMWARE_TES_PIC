@@ -29,6 +29,12 @@
 #pragma config BORV = LO   // Brown-out Reset Voltage Selection (Brown-out Reset Voltage (Vbor), low trip point selected.)
 #pragma config LVP = ON    // Low-Voltage Programming Enable (Low-voltage programming enabled)
 
+// ===== Parametrizacao da variante de hardware =====
+#define NUM_CANAIS 6 // 4 ou 6 - define quantos reles esta variante controla
+
+#define TEM_COOLER // descomentar para incluir controle de cooler nesta variante
+#define COOLER_CURRENT_LIMIAR 1 // 0 = liga o cooler junto com o processo; >0 = liga por limiar de corrente (mesma unidade de CURRENT_SET, corrente ao quadrado)
+
 // Entradas
 #define SW PORTBbits.RB7            // Jumper na barra de programacao para entrar em modo teste
 #define CURRENT_SENSE PORTAbits.RA0 // Sinal de corrente
@@ -38,12 +44,22 @@
 #define SEL_4 PORTAbits.RA4
 
 // Saidas
-#define RELE_1 LATBbits.LATB1 // Rele 1
+// RELE_1 e RELE_4 mudam de pino entre as placas 4T e 6T (fiacao fisica diferente confirmada em bancada)
+#if NUM_CANAIS == 6
+#define RELE_1 LATBbits.LATB0 // Rele 1 (placa 6T)
+#define RELE_4 LATBbits.LATB5 // Rele 4 (placa 6T)
+#define RELE_5 LATAbits.LATA6 // Rele 5
+#define RELE_6 LATAbits.LATA7 // Rele 6
+#else
+#define RELE_1 LATBbits.LATB1 // Rele 1 (placa 4T)
+#define RELE_4 LATBbits.LATB4 // Rele 4 (placa 4T)
+#endif
 #define RELE_2 LATBbits.LATB2 // Rele 2
 #define RELE_3 LATBbits.LATB3 // Rele 3
-#define RELE_4 LATBbits.LATB4 // Rele 4
-// #define RELE_5 LATAbits.LATA6 // Rele 5
-// #define RELE_6 LATAbits.LATA7 // Rele 6
+
+#ifdef TEM_COOLER
+#define COOLER LATBbits.LATB6 // Cooler
+#endif
 
 uint16_t CURRENT_SET = 100; // Define o limite da corrente de corte (10A -> 10*10 = 100)
 
@@ -62,9 +78,9 @@ uint16_t base_s;
 uint8_t base_tensao;
 uint8_t Ativou_Rele = 0;
 
-uint8_t VALOR_CORRENTE[4];
-uint8_t ORDENA_CORRENTE[4] = {0, 1, 2, 3};
-uint8_t FALHOU_CORRENTE[4] = {0, 0, 0, 0};
+uint8_t VALOR_CORRENTE[NUM_CANAIS];
+uint8_t ORDENA_CORRENTE[NUM_CANAIS];
+uint8_t FALHOU_CORRENTE[NUM_CANAIS];
 uint8_t temp_rele_num = 0;
 uint8_t IndexTemp;
 
@@ -169,6 +185,16 @@ void set_rele(uint8_t rel, uint8_t set)
         RELE_4 = set;
         break;
 
+#if NUM_CANAIS == 6
+    case 4:
+        RELE_5 = set;
+        break;
+
+    case 5:
+        RELE_6 = set;
+        break;
+#endif
+
     default:
         break;
     }
@@ -176,14 +202,14 @@ void set_rele(uint8_t rel, uint8_t set)
 
 int current_get()
 {
-    for (uint8_t i = 0; i < 4; i++)
+    for (uint8_t i = 0; i < NUM_CANAIS; i++)
     {
         set_rele(i, 0);
         ORDENA_CORRENTE[i] = i;
         FALHOU_CORRENTE[i] = 0;
     }
 
-    for (uint8_t i = 0; i < 4; i++)
+    for (uint8_t i = 0; i < NUM_CANAIS; i++)
     {
         set_rele(i, 1);
         if (SW == 0) // COM JUMPER NO GND E PGD, MODO TESTE
@@ -192,7 +218,7 @@ int current_get()
         }
         else // SEM JUMPER NO GND E PGD, MODO OPERACIONAL
         {
-            _millis2 = 15000; // 15 SEGUNDOS PARA CADA ACIONAMENTO DOS RELES
+            _millis2 = 5000; // 5 SEGUNDOS PARA CADA ACIONAMENTO DOS RELES
         }
 
         while (_millis2 > 0)
@@ -201,7 +227,7 @@ int current_get()
 
             if (VALOR_CORRENTE[i] >= CURRENT_SET)
             {
-                if (_millis2 < 14750) // tolerancia de 250ms de inrush antes de permitir o corte
+                if (_millis2 < 4500) // tolerancia de 500ms de inrush antes de permitir o corte
                 {
                     _millis2 = 0;
                 }
@@ -223,7 +249,7 @@ int current_sort()
     uint8_t i;
     uint8_t maxIndex = 0;
 
-    for (i = 0; i < (4 - 1); i++)
+    for (i = 0; i < (NUM_CANAIS - 1); i++)
     {
         maxIndex = i;
         for (uint8_t k = i + 1; k > 0; k--)
@@ -279,11 +305,25 @@ void main()
             ESTADO = DESATIVA_RELE;
         }
 
+#ifdef TEM_COOLER
+#if COOLER_CURRENT_LIMIAR > 0
+        if (current >= COOLER_CURRENT_LIMIAR)
+        {
+            COOLER = ON;
+        }
+        else
+        {
+            COOLER = OFF;
+        }
+#else
+        COOLER = ON; // liga junto com o processo
+#endif
+#endif
+
         switch (ESTADO)
         {
         case INICIA_PROCESSO:
 
-            // COOLER = ON; // COOLER ACIONADO
             current_get();
             current_sort();
             _millis = 5;
@@ -320,7 +360,7 @@ void main()
                     _millis = 5; // 5 SEGUNDOS PARA CADA ACIONAMENTO DOS RELES
                 }
 
-                if ((RELE_NUM < 4))
+                if ((RELE_NUM < NUM_CANAIS))
                 {
                     ESTADO = ATIVA_RELE;
                 }
@@ -333,7 +373,7 @@ void main()
 
             if (base_45 >= 2700)
             {
-                if (RELE_NUM < 4)
+                if (RELE_NUM < NUM_CANAIS)
                 {
                     ESTADO = INICIA_PROCESSO;
                     base_45 = 0;
@@ -368,7 +408,7 @@ void main()
                 if (Ativou_Rele == 1)
                 {
                     Ativou_Rele = 0;
-                    if (IndexTemp < 3) // array ORDENA_CORRENTE tem apenas 4 posicoes (0-3); IndexTemp+1 nao pode passar de 3
+                    if (IndexTemp < (NUM_CANAIS - 1)) // IndexTemp+1 nao pode passar do ultimo indice valido (NUM_CANAIS-1)
                     {
                         temp_rele_num = ORDENA_CORRENTE[IndexTemp];
                         ORDENA_CORRENTE[IndexTemp] = ORDENA_CORRENTE[IndexTemp + 1];

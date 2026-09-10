@@ -43,12 +43,14 @@
 # NOCDDL
 
 
-# Environment 
+# Environment
 MKDIR=mkdir
 CP=cp
 CCADMIN=CCadmin
 RANLIB=ranlib
 
+# Versao extraida da variavel "versao" definida em main.c (ex: char versao[8] = "V.1.2.0";)
+VERSAO := $(shell grep -oE 'versao\[[0-9]*\][[:space:]]*=[[:space:]]*"[^"]*"' main.c | grep -oE '"[^"]*"' | tr -d '"')
 
 # build
 build: .build-post
@@ -58,6 +60,10 @@ build: .build-post
 
 .build-post: .build-impl
 # Add your post 'build' code here...
+	@if [ -f "$(CND_ARTIFACT_PATH_$(CONF))" ]; then \
+		$(CP) "$(CND_ARTIFACT_PATH_$(CONF))" "$(CND_ARTIFACT_DIR_$(CONF))/Carregador_4T_13A_$(VERSAO).hex"; \
+		echo "Build versionado gerado: $(CND_ARTIFACT_DIR_$(CONF))/Carregador_4T_13A_$(VERSAO).hex"; \
+	fi
 
 
 # clean
